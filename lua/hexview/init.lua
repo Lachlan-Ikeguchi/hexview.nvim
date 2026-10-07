@@ -13,23 +13,38 @@ local cursor_ns = vim.api.nvim_create_namespace("hexview_cursor_ns")
 -- CONFIGURATION
 -- ============================================================
 M.bytes_per_line = 52
+M.auto_columns = true
 M.ascii_start_col = 0
 M.hex_width = 0
 
 -- ============================================================
 -- AUXILIARY FUNCTIONS
 -- ============================================================
-function M.setup_layout()
-	local width = 0
-	for i = 0, M.bytes_per_line - 1 do
-		width = width + 2
-		if (i + 1) % 4 == 0 and (i + 1) < M.bytes_per_line then
-			width = width + 3
-		else
-			width = width + 1
-		end
+local function hex_width_for(cols)
+	return cols * 3 + 2 * math.floor((cols - 1) / 4)
+end
+
+-- Total rendered line width for a given column count
+local function line_width_for(cols)
+	return 10 + hex_width_for(cols) + 3 + cols
+end
+
+function M.max_columns_for(width)
+	local cols = math.floor((width - 13) / 4.5)
+	if cols < 1 then
+		return 1
 	end
-	M.hex_width = width
+	while cols > 1 and line_width_for(cols) > width do
+		cols = cols - 1
+	end
+	while line_width_for(cols + 1) <= width do
+		cols = cols + 1
+	end
+	return cols
+end
+
+function M.setup_layout()
+	M.hex_width = hex_width_for(M.bytes_per_line)
 	M.ascii_start_col = 10 + M.hex_width + 3
 end
 
@@ -601,16 +616,37 @@ end
 -- 7. ENABLE / DISABLE / REFRESH (OPTIMIZED)
 -- ============================================================
 
+local function apply_columns(cols)
+	local current_offset = M.cursor_byte() or 0
+	M.bytes_per_line = cols
+	M.refresh_view()
+	if current_offset > 0 then
+		local new_row = math.floor((current_offset - 1) / M.bytes_per_line) + 1
+		pcall(vim.api.nvim_win_set_cursor, 0, { new_row, 10 })
+	end
+end
+
 function M.set_columns(cols)
 	if cols < 1 then
 		return
 	end
-	local current_offset = M.cursor_byte() or 0
-	M.bytes_per_line = cols
-	M.refresh_view()
-	local new_row = math.floor(current_offset / M.bytes_per_line) + 1
-	pcall(vim.api.nvim_win_set_cursor, 0, { new_row, 10 })
+	M.auto_columns = false
+	apply_columns(cols)
 	print("HexView: Set on " .. cols .. " columns.")
+end
+
+function M.adapt_columns()
+	if not M.auto_columns then
+		return
+	end
+	local ok, width = pcall(vim.api.nvim_win_get_width, 0)
+	if not ok or width <= 0 then
+		return
+	end
+	local cols = M.max_columns_for(width)
+	if cols ~= M.bytes_per_line then
+		apply_columns(cols)
+	end
 end
 
 function M.refresh_view()
@@ -658,6 +694,12 @@ function M.enable()
 	vim.opt_local.wrap = false
 	vim.bo.filetype = "hexview"
 
+	if M.auto_columns then
+		local ok, width = pcall(vim.api.nvim_win_get_width, 0)
+		if ok and width > 0 then
+			M.bytes_per_line = M.max_columns_for(width)
+		end
+	end
 	M.refresh_view()
 	vim.api.nvim_win_set_cursor(0, { 1, 10 })
 	vim.b.did_ftplugin = 1
@@ -669,6 +711,21 @@ function M.enable()
 		buffer = 0,
 		callback = M.highlight_cursor,
 	})
+	vim.api.nvim_create_autocmd("VimResized", {
+		group = au_group,
+		buffer = 0,
+		callback = function()
+			M.adapt_columns()
+		end,
+	})
+	vim.api.nvim_create_autocmd("WinResized", {
+		group = au_group,
+		callback = function()
+			if vim.bo.filetype == "hexview" then
+				M.adapt_columns()
+			end
+		end,
+	})
 	M.highlight_cursor()
 
 	vim.api.nvim_create_autocmd("BufWriteCmd", { buffer = 0, callback = M.save })
@@ -679,7 +736,7 @@ function M.disable()
 	local buf = vim.api.nvim_get_current_buf()
 	M.disabled_buffers[buf] = true
 
-	vim.api.nvim_clear_autocmds({ group = "HexViewCursor", buffer = 0 })
+	vim.api.nvim_clear_autocmds({ group = "HexViewCursor" })
 	vim.api.nvim_buf_clear_namespace(0, cursor_ns, 0, -1)
 	vim.api.nvim_clear_autocmds({ event = "BufWriteCmd", buffer = 0 })
 	pcall(vim.api.nvim_buf_del_user_command, 0, "HexSet")
@@ -739,6 +796,14 @@ end
 -- 8. SETUP
 -- ============================================================
 function M.setup(config)
+	config = config or {}
+	if config.auto_columns ~= nil then
+		M.auto_columns = config.auto_columns
+	end
+	if config.bytes_per_line then
+		M.bytes_per_line = config.bytes_per_line
+		M.auto_columns = false
+	end
 	M.setup_layout()
 	local group = vim.api.nvim_create_augroup("HexViewAutoDetect", { clear = true })
 	vim.api.nvim_create_autocmd("BufReadPost", {

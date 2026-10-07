@@ -76,11 +76,16 @@ n   Find next:       Continue searching
 Pass configuration options to the setup function.
 
 ```lua
-quire("hexview").setup({
-    -- Currently, the setup function initializes autocommands.
-    -- Future configuration options will go here.
+require("hexview").setup({
+    auto_columns = true,     -- Fit the number of bytes per line to the window
+                             -- width (default). Re-fits automatically on resize.
+    bytes_per_line = 16,     -- Fixed columns instead of adaptive sizing
+                             -- (implies auto_columns = false).
 })
 ```
+
+* The view adapts to the screen width on open and on `VimResized`/`WinResized`, so lines never exceed the window.
+* `:HexSet <columns>` sets a manual override and disables auto-fitting for the session.
 
 ## 🎨 Highlights
 * The plugin defines the following highlight groups, which you can override in your colorscheme:
