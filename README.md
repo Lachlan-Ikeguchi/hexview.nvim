@@ -9,11 +9,30 @@ A lightweight, pure Lua hex editor for Neovim.
 ## ✨ Features
 
 * **Pure Lua**: No external dependencies or binaries required.
+* **Multithreaded loading**: File chunks are read and rendered by libuv worker threads (`uv.new_work`), spread across CPU cores. You can browse and edit the file while it loads; the statusline shows load progress.
 * **Auto-detection**: Automatically enables itself for binary files or files containing null bytes.
 * **Smart Editing**: Edit directly in the Hex column or the ASCII column.
 * **Visual Feedback**: Highlights modified (dirty) bytes before saving.
 * **Smart Navigation**: `h`/`l` jumps correctly between nibbles and columns, skipping separators.
 * **Quick Search HEX string**: `/` locates and jumps to hex string
+
+## ⚡ Performance
+
+Loading is split into chunks that are read and hex-rendered in parallel by libuv worker threads; the main thread only splices the finished lines into the buffer. This keeps Neovim responsive on large files (hundreds of MB render in tens of seconds instead of minutes) and lets you start browsing immediately.
+
+Two knobs:
+
+* `UV_THREADPOOL_SIZE` environment variable (set before starting Neovim, default `4`): number of worker threads.
+* `chunk_bytes` in `setup()` (default `262144`): chunk size; smaller chunks keep insert pauses shorter while loading.
+
+```lua
+require("hexview").setup({ chunk_bytes = 256 * 1024 })
+```
+
+Notes on large files:
+
+* Saving is blocked while a load is in flight (and if a chunk failed to load), so an incomplete load can never write a truncated file.
+* Searching (`/`, `n`) searches the portion loaded so far and tells you how much of the file is available.
 
 
 ![Neovim HexView](/screenshot/screen.png)
